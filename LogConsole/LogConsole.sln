@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
 VisualStudioVersion = 14.0.23107.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Log Console", "Log Console.csproj", "{91F32FAF-BB9A-4A80-BAA0-AAD6FD061A7A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LogConsole", "LogConsole.csproj", "{91F32FAF-BB9A-4A80-BAA0-AAD6FD061A7A}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Demo", "..\Demo\Demo.csproj", "{114ED29A-A6A5-42E1-AD80-85BB01BBFE0C}"
 EndProject

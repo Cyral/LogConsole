@@ -1,17 +1,17 @@
 ﻿using System;
 using System.Timers;
-using Pyratron.Frameworks.LogConsole;
 
-namespace Demo
+namespace Pyratron.Frameworks.LogConsole.Demo
 {
     /// <summary>
     /// Example program.
+    /// https://github.com/Pyratron/LogConsole/
     /// </summary>
     public class Program
     {
         private static Timer timer;
         private static Random random;
-        public static void Main(string[] args)
+        public static void Main()
         {
             Logger.MessageLogged += (message, level, type, time, fullmessage) =>
             {
@@ -19,7 +19,7 @@ namespace Demo
             };
             random = new Random();
             timer = new Timer(500);
-            var testLogType = new LogType("Derp", ConsoleColor.Cyan);
+            var testLogType = new LogType("Test", ConsoleColor.Cyan);
             timer.Elapsed += (sender, eventArgs) =>
             {
                 var rand = random.Next(1, 8);

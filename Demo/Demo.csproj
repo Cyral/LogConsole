@@ -31,7 +31,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup>
-    <StartupObject>Demo.Program</StartupObject>
+    <StartupObject>Pyratron.Frameworks.LogConsole.Demo.Program</StartupObject>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
@@ -48,7 +48,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Log Console\Log Console.csproj">
+    <ProjectReference Include="..\LogConsole\LogConsole.csproj">
       <Project>{91f32faf-bb9a-4a80-baa0-aad6fd061a7a}</Project>
       <Name>Log Console</Name>
     </ProjectReference>
