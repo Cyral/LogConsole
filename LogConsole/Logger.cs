@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Threading;
+using Timer = System.Timers.Timer;
 
 namespace Pyratron.Frameworks.LogConsole
 {
@@ -18,6 +18,31 @@ namespace Pyratron.Frameworks.LogConsole
         private static string input;
         private static int historyIndex;
         private static readonly List<string> inputHistory;
+        private static readonly Queue<string> logQueue;
+        private static readonly Timer flushTimer;
+        private static DateTime lastFlush;
+
+        private static int lastHeight = Console.BufferHeight;
+        private static TimeSpan queueTime = TimeSpan.FromMinutes(2);
+        private static readonly object locker = new object();
+
+        /// <summary>
+        /// Maximum number of logged items before they are written to the file. Default is 25 items.
+        /// </summary>
+        public static int QueueSize { get; set; } = 25;
+
+        /// <summary>
+        /// Maximum amount of time before logged items are written to the file. Default is 2 minutes.
+        /// </summary>
+        public static TimeSpan QueueTime
+        {
+            get { return queueTime; }
+            set
+            {
+                queueTime = value;
+                flushTimer.Interval = queueTime.TotalMilliseconds;
+            }
+        }
 
         /// <summary>
         /// Defines the format messages should be logged in.
@@ -36,6 +61,11 @@ namespace Pyratron.Frameworks.LogConsole
         /// Color list: https://www.pyratron.com/assets/consolehex.png
         /// </example>
         public static string LogFormat { get; set; } = "@07[%timestamp]@XR @XL%level@07 | @XT%type: @XR%message";
+
+        /// <summary>
+        /// Directory where log files will be created daily.
+        /// </summary>
+        public static string LogDirectory { get; set; }
 
         /// <summary>
         /// Format for log file names.
@@ -70,6 +100,10 @@ namespace Pyratron.Frameworks.LogConsole
                 levelColumnLength = Math.Max(levelColumnLength, level.ToString().Length);
             }
 
+            logQueue = new Queue<string>();
+            flushTimer = new Timer();
+            flushTimer.Elapsed += (sender, args) => FlushLog();
+            flushTimer.Start();
             inputHistory = new List<string>(HistoryCount);
             input = string.Empty;
 
@@ -318,21 +352,21 @@ namespace Pyratron.Frameworks.LogConsole
         }
 
         /// <summary>
-        /// Logs a message to the log file for the day.
+        /// Adds a message to the log queue. It is written to the file once it reaches a certain size or a certain amount of time
+        /// elapses.
         /// Each day a new log file is created.
         /// </summary>
-        public static async Task LogToFile(string directory, string message)
+        public static void LogToFile(string message)
         {
+            if (string.IsNullOrWhiteSpace(LogDirectory))
+                throw new InvalidOperationException("LogDirectory must be set.");
             try
             {
-                message = message.Replace("\n", Environment.NewLine);
-                var date = DateTime.Now;
-                var path = Path.Combine(directory, date.ToString(LogFileFormat) + ".txt");
-                using (var logWriter = new StreamWriter(new FileStream(path,
-                        FileMode.Append, FileAccess.Write, FileShare.None, 4096, true)))
+                lock (logQueue)
                 {
-                    await logWriter.WriteLineAsync(message);
-                    logWriter.Close();
+                    logQueue.Enqueue(message);
+
+                    FlushLog();
                 }
             }
             catch (Exception e)
@@ -366,54 +400,96 @@ namespace Pyratron.Frameworks.LogConsole
                 Console.WriteLine(message);
         }
 
-        private static int lastHeight = Console.BufferHeight;
+        /// <summary>
+        /// Writes log items to the log file after a certain number of items have been reached, time has elapsed, or the day has
+        /// changed.
+        /// </summary>
+        public static void FlushLog()
+        {
+            // If the max number of items has been reached, enough time elapsed, or the day has changed, write the items to the log file.
+            if (logQueue.Count >= QueueSize || DateTime.Now - lastFlush > QueueTime ||
+                lastFlush.Date != DateTime.Now.Date)
+            {
+                ThreadPool.QueueUserWorkItem(q =>
+                {
+                    try
+                    {
+                        lock (logQueue)
+                        {
+                            lastFlush = DateTime.Now;
+                            var path = Path.Combine(LogDirectory, lastFlush.ToString(LogFileFormat) + ".txt");
+                            using (var logWriter = new StreamWriter(new FileStream(path,
+                                FileMode.Append, FileAccess.Write, FileShare.None, 1024)))
+                            {
+                                while (logQueue.Count > 0)
+                                {
+                                    logWriter.WriteLine(logQueue.Dequeue());
+                                }
+                                logWriter.Close();
+                            }
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine("Error writing log: " + e);
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                    }
+                });
+            }
+        }
+
         private static void Log(LogLevel level, LogType type, string message, ConsoleColor fg = ConsoleColor.Gray,
             ConsoleColor bg = ConsoleColor.Black, params object[] args)
         {
             try
             {
-                // Replace variables.
-                var str = LogFormat.Replace("%timestamp", GetTimestamp())
-                    .Replace("%level", new string(' ', levelColumnLength - level.ToString().Length) + level);
-                if (type == LogType.None)
-                    str = str.Remove(str.IndexOf("%type", StringComparison.Ordinal) + "%type".Length, 2);
-                str = str.Replace("%type", type.ToString());
-                var msgIndex = str.IndexOf("%message", StringComparison.Ordinal);
-                str = str.Replace("%message", string.Format(message, args));
-
-                var colors = str.Split('@');
-
-                // Reset console line.
-                Console.ForegroundColor = fg;
-                Console.BackgroundColor = bg;
-                FixBuffer();
-                Console.CursorLeft = 0;
-
-                // For each color string, change the console color and write the text.
-                for (var i = 0; i < colors.Length; i++)
+                // Prevent messages from appearing messed up due to Write calls being out of order.
+                lock (locker)
                 {
-                    var colorStr = colors[i];
-                    if (string.IsNullOrWhiteSpace(colorStr)) continue;
-                    var color = FromHex(colorStr, fg, bg, level, type);
+                    // Replace variables.
+                    var str = LogFormat.Replace("%timestamp", GetTimestamp())
+                        .Replace("%level", new string(' ', levelColumnLength - level.ToString().Length) + level);
+                    if (type == LogType.None)
+                        str = str.Remove(str.IndexOf("%type", StringComparison.Ordinal) + "%type".Length, 2);
+                    str = str.Replace("%type", type.ToString());
+                    var msgIndex = str.IndexOf("%message", StringComparison.Ordinal);
+                    str = str.Replace("%message", string.Format(message, args));
 
-                    Console.ForegroundColor = color.Item1;
-                    Console.BackgroundColor = color.Item2;
+                    var colors = str.Split('@');
 
-                    if (i == colors.Length - 1)
-                        Console.WriteLine(colorStr.Substring(2));
-                    else
-                        Console.Write(colorStr.Substring(2));
-
+                    // Reset console line.
                     Console.ForegroundColor = fg;
                     Console.BackgroundColor = bg;
+                    FixBuffer();
+                    Console.CursorLeft = 0;
+
+                    // For each color string, change the console color and write the text.
+                    for (var i = 0; i < colors.Length; i++)
+                    {
+                        var colorStr = colors[i];
+                        if (string.IsNullOrWhiteSpace(colorStr)) continue;
+                        var color = FromHex(colorStr, fg, bg, level, type);
+
+                        Console.ForegroundColor = color.Item1;
+                        Console.BackgroundColor = color.Item2;
+
+                        if (i == colors.Length - 1)
+                            Console.WriteLine(colorStr.Substring(2));
+                        else
+                            Console.Write(colorStr.Substring(2));
+
+                        Console.ForegroundColor = fg;
+                        Console.BackgroundColor = bg;
+                    }
+
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.BackgroundColor = ConsoleColor.Black;
+
+                    var msg = str.Substring(msgIndex);
+                    var fullmsg = string.Join("", colors.Select(x => x.Substring(Math.Min(x.Length, 2))));
+                    OnMessageLogged(msg, level, type, DateTime.Now, fullmsg);
                 }
-
-                Console.ForegroundColor = ConsoleColor.Gray;
-                Console.BackgroundColor = ConsoleColor.Black;
-
-                var msg = str.Substring(msgIndex);
-                var fullmsg = string.Join("", colors.Select(x => x.Substring(Math.Min(x.Length, 2))));
-                OnMessageLogged(msg, level, type, DateTime.Now, fullmsg);
             }
             catch (Exception e)
             {
