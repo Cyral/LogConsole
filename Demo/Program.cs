@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Timers;
 
 namespace Pyratron.Frameworks.LogConsole.Demo
@@ -13,9 +14,10 @@ namespace Pyratron.Frameworks.LogConsole.Demo
         private static Random random;
         public static void Main()
         {
+            Logger.LogDirectory = Path.Combine("C:", "Logs");
             Logger.MessageLogged += (message, level, type, time, fullmessage) =>
             {
-                //Logger.LogToFile("C:\\Logs", fullmessage);
+                Logger.LogToFile(fullmessage);
             };
             random = new Random();
             timer = new Timer(500);
