@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using Timer = System.Timers.Timer;
 
@@ -24,12 +25,13 @@ namespace Pyratron.Frameworks.LogConsole
 
         private static int lastHeight = Console.BufferHeight;
         private static TimeSpan queueTime = TimeSpan.FromMinutes(2);
+        private static TimeSpan minFlushTime = TimeSpan.FromSeconds(30);
         private static readonly object locker = new object();
 
         /// <summary>
-        /// Maximum number of logged items before they are written to the file. Default is 25 items.
+        /// Maximum number of logged items before they are written to the file. Default is 50 items.
         /// </summary>
-        public static int QueueSize { get; set; } = 25;
+        public static int QueueSize { get; set; } = 50;
 
         /// <summary>
         /// Maximum amount of time before logged items are written to the file. Default is 2 minutes.
@@ -39,8 +41,26 @@ namespace Pyratron.Frameworks.LogConsole
             get { return queueTime; }
             set
             {
+                if (value < MinFlushTime)
+                    throw new InvalidOperationException("Queue flush time must be above the minimum flush time.");
                 queueTime = value;
                 flushTimer.Interval = queueTime.TotalMilliseconds;
+            }
+        }
+
+        /// <summary>
+        /// The minimum amount of time that must pass between message queue flushes. This prevents a ton of messages from writing
+        /// to the log file too quickly.
+        /// Default is 30 seconds.
+        /// </summary>
+        public static TimeSpan MinFlushTime
+        {
+            get { return minFlushTime; }
+            set
+            {
+                minFlushTime = value;
+                if (value > QueueTime)
+                    throw new InvalidOperationException("Queue flush time must be above the minimum flush time.");
             }
         }
 
@@ -94,11 +114,13 @@ namespace Pyratron.Frameworks.LogConsole
 
         static Logger()
         {
-            // Find max length of level type so the column can be straight.
+            // Find max length of level type so the column widths can be even.
             foreach (var level in LogLevel.Levels)
             {
                 levelColumnLength = Math.Max(levelColumnLength, level.ToString().Length);
             }
+
+            LogDirectory = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "logs");
 
             logQueue = new Queue<string>();
             flushTimer = new Timer();
@@ -393,7 +415,7 @@ namespace Pyratron.Frameworks.LogConsole
         {
             if (Console.WindowWidth - message.Length > 0)
             {
-                Console.Write(new string(' ', (Console.WindowWidth - message.Length)/2));
+                Console.Write(new string(' ', (Console.WindowWidth - message.Length) / 2));
                 Console.WriteLine(message);
             }
             else
@@ -406,10 +428,12 @@ namespace Pyratron.Frameworks.LogConsole
         /// </summary>
         public static void FlushLog()
         {
-            // If the max number of items has been reached, enough time elapsed, or the day has changed, write the items to the log file.
-            if (logQueue.Count >= QueueSize || DateTime.Now - lastFlush > QueueTime ||
-                lastFlush.Date != DateTime.Now.Date)
+            // If the max number of items has been reached, enough time elapsed, or the day has changed, AND the minimum time between writes has passed, write the items to the log file.
+            if ((logQueue.Count >= QueueSize || DateTime.Now - lastFlush > QueueTime ||
+                lastFlush.Date != DateTime.Now.Date) && DateTime.Now - lastFlush > MinFlushTime)
             {
+                if (string.IsNullOrWhiteSpace(LogDirectory))
+                    throw new InvalidOperationException("LogDirectory must be set.");
                 ThreadPool.QueueUserWorkItem(q =>
                 {
                     try
