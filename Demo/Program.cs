@@ -15,10 +15,6 @@ namespace Pyratron.Frameworks.LogConsole.Demo
         public static void Main()
         {
             Logger.LogDirectory = Path.Combine("C:", "Logs");
-            Logger.MessageLogged += (message, level, type, time, fullmessage) =>
-            {
-                Logger.LogToFile(fullmessage);
-            };
             random = new Random();
             timer = new Timer(500);
             var testLogType = new LogType("Test", ConsoleColor.Cyan);

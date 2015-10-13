@@ -27,6 +27,20 @@ namespace Pyratron.Frameworks.LogConsole
         private static TimeSpan queueTime = TimeSpan.FromMinutes(2);
         private static TimeSpan minFlushTime = TimeSpan.FromSeconds(30);
         private static readonly object locker = new object();
+        private static bool fileLogging;
+
+        /// <summary>
+        /// Indicates if file logging should be enabled.
+        /// </summary>
+        public static bool FileLogging
+        {
+            get { return fileLogging; }
+            set
+            {
+                fileLogging = value;
+                flushTimer.Enabled = value;
+            }
+        }
 
         /// <summary>
         /// Maximum number of logged items before they are written to the file. Default is 50 items.
@@ -130,6 +144,11 @@ namespace Pyratron.Frameworks.LogConsole
             input = string.Empty;
 
             MessageLogged += (message, level, type, time, fullmessage) => { WriteCommandCursor(); };
+            MessageLogged += (message, level, type, time, fullmessage) =>
+            {
+                if (FileLogging)
+                    LogToFile(fullmessage);
+            };
         }
 
         /// <summary>
@@ -380,6 +399,8 @@ namespace Pyratron.Frameworks.LogConsole
         /// </summary>
         public static void LogToFile(string message)
         {
+            if (!FileLogging) return;
+
             if (string.IsNullOrWhiteSpace(LogDirectory))
                 throw new InvalidOperationException("LogDirectory must be set.");
             try
@@ -428,6 +449,7 @@ namespace Pyratron.Frameworks.LogConsole
         /// </summary>
         public static void FlushLog()
         {
+            if (!FileLogging) return;
             // If the max number of items has been reached, enough time elapsed, or the day has changed, AND the minimum time between writes has passed, write the items to the log file.
             if ((logQueue.Count >= QueueSize || DateTime.Now - lastFlush > QueueTime ||
                 lastFlush.Date != DateTime.Now.Date) && DateTime.Now - lastFlush > MinFlushTime)
